@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Photogenik"><meta name="theme-color" content="#000000">
+<title>Photogenik</title>
+<style>
+:root{--ac:#ff5c8a}*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:#0b0b0f;color:#fff;font:16px system-ui,-apple-system,sans-serif;overflow:hidden}
+.tab{display:none;position:absolute;inset:0 0 calc(56px + env(safe-area-inset-bottom)) 0;overflow:hidden}.tab.on{display:block}
+nav{position:fixed;bottom:0;left:0;right:0;height:calc(56px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);display:flex;background:#111;border-top:1px solid #222}
+nav button{flex:1;background:none;border:0;color:#888;font-size:14px}nav button.on{color:var(--ac)}
+#vid,#ov{position:absolute;inset:0;width:100%;height:100%}#vid{object-fit:cover;background:#000}#vid.m{transform:scaleX(-1)}
+#ring{position:absolute;inset:0;border:44px solid #fff;pointer-events:none;display:none}
+.pill{background:rgba(0,0,0,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:8px 14px;border-radius:99px;font-size:14px;font-weight:600}
+#top{position:absolute;top:calc(8px + env(safe-area-inset-top));left:0;right:0;display:flex;justify-content:center}
+#bot{position:absolute;bottom:8px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:10px}
+#chips{display:flex;gap:8px;overflow-x:auto;padding:0 12px;max-width:100%}
+.chip{flex:none;border:0;border-radius:99px;padding:8px 14px;background:#333;color:#fff;font-size:14px}.chip.on{background:var(--ac)}
+#bar{display:flex;gap:26px;align-items:center}#bar button{background:none;border:0;color:#fff;font-size:26px}
+#shut{width:72px;height:72px;border-radius:50%;border:4px solid #fff!important;background:rgba(255,255,255,.3)!important}
+#bs{overflow-y:auto;padding:12px}#bs label{display:inline-block;background:var(--ac);padding:10px 16px;border-radius:99px;font-weight:600}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px;margin-top:12px}
+.c{position:relative;height:150px;border-radius:8px;overflow:hidden}.c img{width:100%;height:100%;object-fit:cover}
+.c span{position:absolute;top:4px;left:4px}#msg{color:#999;margin-top:10px;font-size:14px}
+</style></head><body>
+<section class="tab on" id="coach">
+  <video id="vid" playsinline muted></video><canvas id="ov"></canvas><div id="ring"></div>
+  <div id="top"><div class="pill" id="hint">Starting camera…</div></div>
+  <div id="bot"><div class="pill" id="tip" style="font-weight:400;font-size:13px"></div>
+    <div id="chips"></div>
+    <div id="bar"><button id="bRing">◎</button><button id="shut"></button><button id="bOv">🧍</button><button id="bFlip">🔄</button></div></div>
+</section>
+<section class="tab" id="bs"><label>＋ Add photos<input id="files" type="file" accept="image/*" multiple hidden></label>
+  <div id="msg">Add a burst of photos and Photogenik will rank them. Everything stays on your device.</div><div id="grid"></div></section>
+<nav><button class="on" data-t="coach">Coach</button><button data-t="bs">Best Shots</button></nav>
+<script>
+const $=id=>document.getElementById(id);
+const BONES=[[0,1],[1,2],[1,3],[2,4],[4,6],[3,5],[5,7],[2,8],[3,9],[8,9],[8,10],[10,12],[9,11],[11,13]];
+const POSES=[
+["Relaxed","Shift weight to one leg, let arms hang loose.",[.5,.12,.5,.2,.4,.22,.6,.22,.36,.38,.64,.38,.40,.52,.60,.52,.44,.52,.56,.52,.43,.72,.57,.72,.42,.92,.58,.92]],
+["Hand on hip","Pop one elbow out, chin slightly down.",[.5,.12,.5,.2,.4,.22,.6,.22,.31,.38,.64,.38,.42,.51,.60,.52,.44,.52,.56,.52,.43,.72,.58,.72,.42,.92,.60,.92]],
+["Power stance","Feet wider than shoulders, hands on hips.",[.5,.12,.5,.2,.38,.22,.62,.22,.30,.38,.70,.38,.41,.51,.59,.51,.43,.52,.57,.52,.38,.72,.62,.72,.33,.92,.67,.92]],
+["Walking","Mid-stride, one arm forward, look off-camera.",[.5,.12,.5,.2,.4,.22,.6,.22,.35,.38,.65,.38,.33,.52,.67,.50,.44,.52,.56,.52,.40,.72,.62,.70,.34,.92,.68,.88]],
+["Lean","Tilt your torso and rest your weight on one side.",[.58,.12,.55,.2,.45,.22,.65,.22,.40,.37,.70,.36,.45,.50,.66,.50,.47,.52,.59,.52,.44,.72,.60,.72,.42,.92,.62,.92]]];
+let cur=0,showOv=true,facing='user',stream,tab='coach',lm,last=0;
+const vid=$('vid'),ov=$('ov'),cx=ov.getContext('2d');
+
+// ---- pose overlay
+function drawPose(){const w=ov.width=ov.clientWidth,h=ov.height=ov.clientHeight;cx.clearRect(0,0,w,h);if(!showOv)return;
+ const P=POSES[cur][2],px=w*.1,py=h*.14,W=w-2*px,H=h-2*py,pt=i=>[px+P[2*i]*W,py+P[2*i+1]*H];
+ cx.strokeStyle='rgba(255,255,255,.85)';cx.lineWidth=4;cx.lineCap='round';cx.setLineDash([2,10]);cx.beginPath();
+ BONES.forEach(([a,b])=>{cx.moveTo(...pt(a));cx.lineTo(...pt(b))});
+ const [hx,hy]=pt(0),r=W*.07;cx.moveTo(hx+r,hy);cx.arc(hx,hy,r,0,7);cx.stroke()}
+function pick(i){cur=i;$('tip').textContent=POSES[i][1];[...$('chips').children].forEach((c,j)=>c.classList.toggle('on',j===i));drawPose()}
+POSES.forEach((p,i)=>{const b=document.createElement('button');b.className='chip';b.textContent=p[0];b.onclick=()=>pick(i);$('chips').append(b)});
+addEventListener('resize',drawPose);
+
+// ---- camera
+function stopCam(){stream?.getTracks().forEach(t=>t.stop());stream=null}
+async function startCam(){stopCam();try{
+ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:1920}},audio:false});
+ vid.srcObject=stream;vid.classList.toggle('m',facing==='user');await vid.play();$('hint').textContent='Get your face in frame'}
+ catch(e){$('hint').textContent='Camera blocked. Allow access and reload.'}}
+$('bFlip').onclick=()=>{facing=facing==='user'?'environment':'user';startCam()};
+$('bRing').onclick=()=>{const r=$('ring');r.style.display=r.style.display==='block'?'none':'block'};
+$('bOv').onclick=()=>{showOv=!showOv;drawPose()};
+$('shut').onclick=()=>{const c=document.createElement('canvas');c.width=vid.videoWidth;c.height=vid.videoHeight;const g=c.getContext('2d');
+ if(facing==='user'){g.translate(c.width,0);g.scale(-1,1)}g.drawImage(vid,0,0);
+ c.toBlob(async b=>{const f=new File([b],'photogenik.jpg',{type:'image/jpeg'});
+  if(navigator.canShare?.({files:[f]})){try{await navigator.share({files:[f]});return}catch(e){}}
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=f.name;a.click()},'image/jpeg',.95)};
+
+// ---- face analysis (MediaPipe, on-device)
+(async()=>{try{const V='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+ const {FilesetResolver,FaceLandmarker}=await import(V+'/+esm');const f=await FilesetResolver.forVisionTasks(V+'/wasm');
+ lm=await FaceLandmarker.createFromOptions(f,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'},runningMode:'IMAGE',numFaces:1,outputFaceBlendshapes:true})}
+ catch(e){console.warn('Face model failed',e)}})();
+function angles(L,W,H){const n=L[1],l=L[234],r=L[454],a=L[33],b=L[263],hw=(r.x-l.x)/2||1e-6;
+ const s=Math.max(-1,Math.min(1,(n.x-(l.x+r.x)/2)/hw));
+ return{yaw:Math.asin(s)*180/Math.PI,roll:Math.atan2((b.y-a.y)*H,(b.x-a.x)*W)*180/Math.PI}}
+function loop(t){if(tab==='coach'&&lm&&vid.readyState>=2&&t-last>150){last=t;
+ const r=lm.detect(vid),L=r.faceLandmarks[0],h=$('hint');
+ if(!L)h.textContent='Get your face in frame';else{const a=angles(L,vid.videoWidth,vid.videoHeight),y=Math.abs(a.yaw);
+  h.textContent=Math.abs(a.roll)>10?'Level your head':y<8?'Turn your head slightly. 3/4 angles flatter':y<=30?'Great angle ✓':'Turn back a little'}}
+ requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+
+// ---- best shots
+function toCanvas(b,max){const k=Math.min(1,max/Math.max(b.width,b.height)),c=document.createElement('canvas');
+ c.width=b.width*k|0;c.height=b.height*k|0;c.getContext('2d').drawImage(b,0,0,c.width,c.height);return c}
+function sharp(c){const w=256,h=256,t=document.createElement('canvas');t.width=w;t.height=h;
+ const g=t.getContext('2d',{willReadFrequently:true});g.drawImage(c,0,0,w,h);const d=g.getImageData(0,0,w,h).data;
+ const y=i=>d[i*4]*.299+d[i*4+1]*.587+d[i*4+2]*.114;let s=0;
+ for(let j=1;j<h;j++)for(let i=1;i<w;i++){const v=y(j*w+i);s+=Math.abs(v-y(j*w+i-1))+Math.abs(v-y((j-1)*w+i))}
+ return Math.min(s/(w*h)/18,1)}
+function score(c){const sh=sharp(c);if(!lm)return sh*.8;const r=lm.detect(c);if(!r.faceLandmarks.length)return sh*.8;
+ const bs=Object.fromEntries(r.faceBlendshapes[0].categories.map(k=>[k.categoryName,k.score]));
+ const eyes=1-(bs.eyeBlinkLeft+bs.eyeBlinkRight)/2,smile=(bs.mouthSmileLeft+bs.mouthSmileRight)/2,
+ {yaw}=angles(r.faceLandmarks[0],c.width,c.height);
+ return .35*sh+.35*eyes+.15*Math.min(smile*2,1)+.15*(1-Math.min(Math.abs(yaw)/45,1))}
+$('files').onchange=async e=>{const g=$('grid');g.innerHTML='';$('msg').textContent='Ranking…';const out=[];
+ for(const f of e.target.files){try{const bmp=await createImageBitmap(f,{imageOrientation:'from-image'}),c=toCanvas(bmp,1024);
+  out.push({url:c.toDataURL('image/jpeg',.8),s:score(c)})}catch(err){console.warn(err)}
+  await new Promise(r=>setTimeout(r));}
+ out.sort((a,b)=>b.s-a.s);
+ out.forEach((o,i)=>{const d=document.createElement('div');d.className='c';d.innerHTML=`<img src="${o.url}"><span class="pill">${i?Math.round(o.s*100):'★ Best'}</span>`;g.append(d)});
+ $('msg').textContent=out.length?`${out.length} photos ranked${lm?'':' (face model unavailable, sharpness only)'}`:'No photos loaded.'};
+
+// ---- tabs
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;
+ document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+ document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id===tab));
+ tab==='coach'?(startCam(),drawPose()):stopCam()});
+pick(0);startCam();
+</script></body></html>
